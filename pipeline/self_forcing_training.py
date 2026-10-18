@@ -1,8 +1,25 @@
 from utils.wan_wrapper import WanDiffusionWrapper
+from utils import fsdp_hold
 from utils.scheduler import SchedulerInterface
 from typing import List, Optional
+import os
 import torch
 import torch.distributed as dist
+
+
+class _HostIndex:
+    """[global_end_index, local_end_index] as python ints. Not a list: the FSDP root copies list and dict arguments
+    (torch.distributed.utils._apply_to_tensors), so only an object it passes through by reference sees the update."""
+    __slots__ = ("ends",)
+
+    def __init__(self):
+        self.ends = [0, 0]
+
+    def __getitem__(self, i):
+        return self.ends[i]
+
+    def __setitem__(self, i, value):
+        self.ends[i] = value
 
 
 class SelfForcingTrainingPipeline:
@@ -57,7 +74,13 @@ class SelfForcingTrainingPipeline:
         dist.broadcast(indices, src=0)  # Broadcast the random indices to all ranks
         return indices.tolist()
 
-    def inference_with_trajectory(
+    def inference_with_trajectory(self, noise, initial_latent=None, return_sim_step=False, **conditional_dict):
+        # SF_FSDP_HOLD=1 (utils/fsdp_hold.py): the generator all-gathers once for the rollout's no-grad forwards
+        with fsdp_hold.hold(self.generator):
+            return self._inference_with_trajectory(noise, initial_latent=initial_latent,
+                                                   return_sim_step=return_sim_step, **conditional_dict)
+
+    def _inference_with_trajectory(
             self,
             noise: torch.Tensor,
             initial_latent: Optional[torch.Tensor] = None,
@@ -240,6 +263,8 @@ class SelfForcingTrainingPipeline:
         """
         Initialize a Per-GPU KV cache for the Wan model.
         """
+        if self._reuse_kv_cache(batch_size, dtype, device):
+            return
         kv_cache1 = []
 
         for _ in range(self.num_transformer_blocks):
@@ -250,7 +275,31 @@ class SelfForcingTrainingPipeline:
                 "local_end_index": torch.tensor([0], dtype=torch.long, device=device)
             })
 
+        if os.environ.get("SF_NO_SYNC") == "1":
+            # CPU mirror of [global_end_index, local_end_index], read by CausalWanSelfAttention instead of .item()
+            for cache in kv_cache1:
+                cache["host_index"] = _HostIndex()
+
         self.kv_cache1 = kv_cache1  # always store the clean cache
+
+    def _reuse_kv_cache(self, batch_size, dtype, device):
+        """SF_CUDAGRAPH: the captured rollout forwards read and write the KV cache in place, so it keeps its addresses
+        across rollouts: the same zeros as a fresh cache, detached from the previous rollout's autograd history."""
+        if os.environ.get("SF_CUDAGRAPH") != "1" or self.kv_cache1 is None:
+            return False
+        shape = (batch_size, self.kv_cache_size, 12, 128)
+        if any(tuple(c["k"].shape) != shape or c["k"].dtype != dtype or c["k"].device != torch.device(device)
+               for c in self.kv_cache1):
+            return False
+        for cache in self.kv_cache1:
+            for name in ("k", "v", "global_end_index", "local_end_index"):
+                cache[name] = cache[name].detach()
+                cache[name].zero_()
+            if os.environ.get("SF_NO_SYNC") == "1":
+                cache["host_index"] = _HostIndex()
+            else:
+                cache.pop("host_index", None)
+        return True
 
     def _initialize_crossattn_cache(self, batch_size, dtype, device):
         """
@@ -264,4 +313,7 @@ class SelfForcingTrainingPipeline:
                 "v": torch.zeros([batch_size, 512, 12, 128], dtype=dtype, device=device),
                 "is_init": False
             })
+        if fsdp_hold.xattn_cache_enabled():
+            # SF_XATTN_CACHE=1: slots the FSDP root's argument copy keeps by reference, so the cache is effective
+            crossattn_cache = [fsdp_hold.CacheSlot(c) for c in crossattn_cache]
         self.crossattn_cache = crossattn_cache

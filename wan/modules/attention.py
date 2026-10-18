@@ -1,17 +1,18 @@
 # Copyright 2024-2025 The Alibaba Wan Team Authors. All rights reserved.
+import os
+
 import torch
 
-try:
-    import flash_attn_interface
-
-    def is_hopper_gpu():
-        if not torch.cuda.is_available():
-            return False
-        device_name = torch.cuda.get_device_name(0).lower()
-        return "h100" in device_name or "hopper" in device_name
-    FLASH_ATTN_3_AVAILABLE = is_hopper_gpu()
-except ModuleNotFoundError:
-    FLASH_ATTN_3_AVAILABLE = False
+# Use the separately installed official FA3 package. Detect Hopper lazily on the
+# first call; SF_ATTN=fa2 keeps the upstream FA2 path.
+FLASH_ATTN_3_AVAILABLE = False
+if os.environ.get('SF_ATTN', 'fa3') == 'fa3':
+    try:
+        from flash_attn_3 import flash_attn_interface
+        FLASH_ATTN_3_AVAILABLE = True
+    except ImportError:
+        FLASH_ATTN_3_AVAILABLE = False
+_FA3_DEVICES = {}
 
 try:
     import flash_attn
@@ -19,7 +20,23 @@ try:
 except ModuleNotFoundError:
     FLASH_ATTN_2_AVAILABLE = False
 
-# FLASH_ATTN_3_AVAILABLE = False
+
+def _fa3_usable(q, k, v, q_lens, k_lens, lk, dropout_p, window_size, version):
+    """FA3 dense path: Hopper, head dim 128, bf16 compute, no dropout/window, and no padding to mask out (k_lens absent
+    or a CPU tensor equal to the full key length, so checking it costs no GPU sync)."""
+    if not FLASH_ATTN_3_AVAILABLE or version == 2 or dropout_p != 0. or tuple(window_size) != (-1, -1):
+        return False
+    if q.size(-1) != 128 or k.size(-1) != 128 or v.size(-1) != 128 or v.dtype not in (torch.bfloat16, torch.float32):
+        return False
+    if q_lens is not None:
+        return False
+    if k_lens is not None and (k_lens.is_cuda or bool((k_lens != lk).any())):
+        return False
+    dev = q.device.index if q.device.index is not None else torch.cuda.current_device()
+    if dev not in _FA3_DEVICES:
+        _FA3_DEVICES[dev] = torch.cuda.get_device_capability(dev)[0] == 9
+    return _FA3_DEVICES[dev]
+
 
 import warnings
 
@@ -67,12 +84,31 @@ def flash_attention(
     def half(x):
         return x if x.dtype in half_dtypes else x.to(dtype)
 
+    if dtype == torch.bfloat16 and _fa3_usable(q, k, v, q_lens, k_lens, lk, dropout_p, window_size, version):
+        # same casts as the varlen path below, dense [B, L, N, C] layout, no length tensors to build
+        q, k, v = half(q), half(k), half(v)
+        q = q.to(v.dtype)
+        k = k.to(v.dtype)
+        if q_scale is not None:
+            q = q * q_scale
+        x = flash_attn_interface.flash_attn_func(
+            q=q,
+            k=k,
+            v=v,
+            softmax_scale=softmax_scale,
+            causal=causal,
+            deterministic=deterministic or torch.are_deterministic_algorithms_enabled())
+        return x.type(out_dtype)
+
     # preprocess query
     if q_lens is None:
         q = half(q.flatten(0, 1))
-        q_lens = torch.tensor(
-            [lq] * b, dtype=torch.int32).to(
-                device=q.device, non_blocking=True)
+        if torch.cuda.is_current_stream_capturing():  # SF_CUDAGRAPH: same lengths, built on the device (no H2D copy)
+            q_lens = torch.full([b], lq, dtype=torch.int32, device=q.device)
+        else:
+            q_lens = torch.tensor(
+                [lq] * b, dtype=torch.int32).to(
+                    device=q.device, non_blocking=True)
     else:
         q = half(torch.cat([u[:v] for u, v in zip(q, q_lens)]))
 
@@ -80,9 +116,12 @@ def flash_attention(
     if k_lens is None:
         k = half(k.flatten(0, 1))
         v = half(v.flatten(0, 1))
-        k_lens = torch.tensor(
-            [lk] * b, dtype=torch.int32).to(
-                device=k.device, non_blocking=True)
+        if torch.cuda.is_current_stream_capturing():
+            k_lens = torch.full([b], lk, dtype=torch.int32, device=k.device)
+        else:
+            k_lens = torch.tensor(
+                [lk] * b, dtype=torch.int32).to(
+                    device=k.device, non_blocking=True)
     else:
         k = half(torch.cat([u[:v] for u, v in zip(k, k_lens)]))
         v = half(torch.cat([u[:v] for u, v in zip(v, k_lens)]))
@@ -93,13 +132,9 @@ def flash_attention(
     if q_scale is not None:
         q = q * q_scale
 
-    if version is not None and version == 3 and not FLASH_ATTN_3_AVAILABLE:
-        warnings.warn(
-            'Flash attention 3 is not available, use flash attention 2 instead.'
-        )
 
     # apply attention
-    if (version is None or version == 3) and FLASH_ATTN_3_AVAILABLE:
+    if False:  # Keep padded inputs on the existing FA2 path
         # Note: dropout_p, window_size are not supported in FA3 now.
         x = flash_attn_interface.flash_attn_varlen_func(
             q=q,

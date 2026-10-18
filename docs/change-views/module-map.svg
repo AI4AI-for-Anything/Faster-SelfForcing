@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="648pt" height="475.2pt" viewBox="0 0 648 475.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.8, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 475.2
+L 648 475.2
+L 648 0
+L 0 0
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 37.584 246.6288
+L 309.096 246.6288
+Q 316.872 246.6288 316.872 240.9264
+L 316.872 82.2096
+Q 316.872 76.5072 309.096 76.5072
+L 37.584 76.5072
+Q 29.808 76.5072 29.808 82.2096
+L 29.808 240.9264
+Q 29.808 246.6288 37.584 246.6288
+z
+" clip-path="url(#pdaf86af873)" style="fill: #faf5f5; stroke: #eadfe0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 332.424 246.6288
+L 603.936 246.6288
+Q 611.712 246.6288 611.712 240.9264
+L 611.712 82.2096
+Q 611.712 76.5072 603.936 76.5072
+L 332.424 76.5072
+Q 324.648 76.5072 324.648 82.2096
+L 324.648 240.9264
+Q 324.648 246.6288 332.424 246.6288
+z
+" clip-path="url(#pdaf86af873)" style="fill: #faf5f5; stroke: #eadfe0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 37.584 431.9568
+L 309.096 431.9568
+Q 316.872 431.9568 316.872 426.2544
+L 316.872 267.5376
+Q 316.872 261.8352 309.096 261.8352
+L 37.584 261.8352
+Q 29.808 261.8352 29.808 267.5376
+L 29.808 426.2544
+Q 29.808 431.9568 37.584 431.9568
+z
+" clip-path="url(#pdaf86af873)" style="fill: #faf5f5; stroke: #eadfe0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 332.424 431.9568
+L 603.936 431.9568
+Q 611.712 431.9568 611.712 426.2544
+L 611.712 267.5376
+Q 611.712 261.8352 603.936 261.8352
+L 332.424 261.8352
+Q 324.648 261.8352 324.648 267.5376
+L 324.648 426.2544
+Q 324.648 431.9568 332.424 431.9568
+z
+" clip-path="url(#pdaf86af873)" style="fill: #faf5f5; stroke: #eadfe0; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 35.64 80.784
+L 311.04 80.784
+" clip-path="url(#pdaf86af873)" style="fill: none; stroke: #8c0000; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_2">
+    <path d="M 330.48 80.784
+L 605.88 80.784
+" clip-path="url(#pdaf86af873)" style="fill: none; stroke: #8c0000; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_3">
+    <path d="M 35.64 266.112
+L 311.04 266.112
+" clip-path="url(#pdaf86af873)" style="fill: none; stroke: #8c0000; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="line2d_4">
+    <path d="M 330.48 266.112
+L 605.88 266.112
+" clip-path="url(#pdaf86af873)" style="fill: none; stroke: #8c0000; stroke-width: 2; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 23px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #292122" x="35.64" y="38.016" transform="rotate(-0 35.64 38.016)">What changed in Faster-SelfForcing</text>
+   </g>
+   <g id="text_2">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #8c0000" x="44.712" y="99.792" transform="rotate(-0 44.712 99.792)">01</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #79696b" x="301.32" y="99.792" transform="rotate(-0 301.32 99.792)">1 file + dependency</text>
+   </g>
+   <g id="text_4">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #292122" x="44.712" y="121.6512" transform="rotate(-0 44.712 121.6512)">Attention</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(44.712 156.088791)">Vendored FlashAttention-3 for Hopper</text>
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(44.712 170.753094)">On by default; SF_ATTN=fa2 restores FA2</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(44.712 212.916523)">wan/modules/attention.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(44.712 225.72)">Official FA3 package (Hopper)</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #8c0000" x="339.552" y="99.792" transform="rotate(-0 339.552 99.792)">02</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #79696b" x="596.16" y="99.792" transform="rotate(-0 596.16 99.792)">4 files</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #292122" x="339.552" y="121.6512" transform="rotate(-0 339.552 121.6512)">Rollout &amp; FSDP</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(339.552 156.088791)">Generator gathered once per rollout</text>
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(339.552 170.753094)">Cached cross-attn K/V · CUDA graphs</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(339.552 199.584609)">pipeline/self_forcing_training.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(339.552 212.652305)">utils/fsdp_hold.py · utils/cuda_graph.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(339.552 225.72)">wan/modules/causal_model.py</text>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #8c0000" x="44.712" y="285.12" transform="rotate(-0 44.712 285.12)">03</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #79696b" x="301.32" y="285.12" transform="rotate(-0 301.32 285.12)">6 files</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #292122" x="44.712" y="306.9792" transform="rotate(-0 44.712 306.9792)">Bit-exact fused kernels</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(44.712 341.416791)">RMSNorm · LayerNorm + modulate</text>
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(44.712 356.081094)">QK-norm + RoPE · gated residual</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(44.712 384.912609)">wan/modules/fused_ew.py · fused_ln.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(44.712 397.980305)">fused_qk.py · fused_rope.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(44.712 411.048)">compiled_ops.py · model.py</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #8c0000" x="339.552" y="285.12" transform="rotate(-0 339.552 285.12)">04</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #79696b" x="596.16" y="285.12" transform="rotate(-0 596.16 285.12)">3 files</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #292122" x="339.552" y="306.9792" transform="rotate(-0 339.552 306.9792)">Memory &amp; overhead</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(339.552 341.416791)">Selective checkpointing · BF16 frozen models</text>
+    <text style="font-size: 10.3px; font-family: 'DejaVu Sans'; fill: #292122" transform="translate(339.552 356.081094)">Resident text encoder · async EMA</text>
+   </g>
+   <g id="text_21">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(339.552 385.441047)">wan/modules/sac.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(339.552 398.244523)">trainer/distillation.py</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #79696b" transform="translate(339.552 411.048)">utils/distributed.py</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pdaf86af873">
+   <rect x="0" y="0" width="648" height="475.2"/>
+  </clipPath>
+ </defs>
+</svg>

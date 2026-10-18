@@ -1,0 +1,48 @@
+{
+  "hardware": "2 H200-class GPUs (Hopper, sm_90); 1 video per GPU as in the upstream recipe; BF16 mixed precision",
+  "scope": "Cumulative configurations; time per training iteration (one critic step, plus a generator step every fifth iteration). R01 is a timing screen against the R00 baseline with a quick check; R04-R08 are full checks with their own reference runs. Step numbers are the interactive rounds.",
+  "rows": [
+    {
+      "round": 1,
+      "label": "FlashAttention-3",
+      "check": "quick",
+      "reference_ms": 10400.0,
+      "candidate_ms": 8399.0,
+      "speedup": 1.2383
+    },
+    {
+      "round": 4,
+      "label": "Bit-exact switches + FSDP hold",
+      "check": "full",
+      "reference_ms": 11086.5,
+      "candidate_ms": 6444.7,
+      "speedup": 1.7203
+    },
+    {
+      "round": 5,
+      "label": "CUDA graphs + fused elementwise",
+      "check": "full",
+      "reference_ms": 10824.5,
+      "candidate_ms": 5364.4,
+      "speedup": 2.0178
+    },
+    {
+      "round": 6,
+      "label": "Asynchronous EMA",
+      "check": "full",
+      "reference_ms": 10660.5,
+      "candidate_ms": 5436.8,
+      "speedup": 1.9608
+    },
+    {
+      "round": 8,
+      "label": "Memory-traffic fusions + BF16 frozen models",
+      "check": "full",
+      "reference_ms": 10811.0,
+      "candidate_ms": 5191.9,
+      "speedup": 2.0823,
+      "peak_allocated_gib": {"reference": 93.55, "candidate": 83.57},
+      "peak_reserved_gib": {"reference": 128.4, "candidate": 125.82}
+    }
+  ]
+}

@@ -3,6 +3,10 @@ import math
 
 import torch
 import torch.nn as nn
+from .compiled_ops import gate_residual, modulate, rms_norm, rms_norm_usable
+from . import fused_ew
+from . import fused_qk
+from . import fused_ln
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 from einops import repeat
@@ -19,8 +23,13 @@ def sinusoidal_embedding_1d(dim, position):
     position = position.type(torch.float64)
 
     # calculation
-    sinusoid = torch.outer(
-        position, torch.pow(10000, -torch.arange(half).to(position).div(half)))
+    import os
+    if os.environ.get('SF_NO_SYNC') == '1':
+        # the same integers built on the device: the CPU arange + blocking copy synchronised every forward
+        exponent = torch.arange(half, device=position.device).to(position).div(half)
+    else:
+        exponent = torch.arange(half).to(position).div(half)
+    sinusoid = torch.outer(position, torch.pow(10000, -exponent))
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x
 
@@ -36,8 +45,16 @@ def rope_params(max_seq_len, dim, theta=10000):
     return freqs
 
 
+# SF_ROPE_FUSED=1: one bit-identical Triton pass per direction instead of the float64 complex round trip
+from .fused_rope import ROPE_FUSED, fused_rope_apply  # noqa: E402
+
+
 # @amp.autocast(enabled=False)
 def rope_apply(x, grid_sizes, freqs):
+    if ROPE_FUSED:
+        out = fused_rope_apply(x, grid_sizes, freqs)
+        if out is not None:
+            return out
     n, c = x.size(2), x.size(3) // 2
 
     # split freqs
@@ -80,6 +97,13 @@ class WanRMSNorm(nn.Module):
         Args:
             x(Tensor): Shape [B, L, C]
         """
+        if fused_ew.ENABLED:
+            # SF_FUSE_EW=1: one bit-identical Triton kernel per direction (wan/modules/fused_ew.py)
+            y = fused_ew.rms_norm(x, self.weight, self.eps)
+            if y is not None:
+                return y
+        if rms_norm_usable(x, self.weight):
+            return rms_norm(x, self.weight, self.eps)
         return self._norm(x.float()).type_as(x) * self.weight
 
     def _norm(self, x):
@@ -97,6 +121,19 @@ class WanLayerNorm(nn.LayerNorm):
             x(Tensor): Shape [B, L, C]
         """
         return super().forward(x).type_as(x)
+
+
+def norm_modulate(norm, x, scale, shift, frames=None):
+    """modulate(norm(x), scale, shift), with norm(x) unflattened to frames=(F, S) first when given.
+    SF_FUSE_LNMOD=1: the LayerNorm and the modulation in one bit-identical kernel (wan/modules/fused_ln.py)."""
+    if fused_ln.ENABLED:
+        out = fused_ln.ln_modulate(norm, x, scale, shift, frames)
+        if out is not None:
+            return out
+    h = norm(x)
+    if frames is not None:
+        h = h.unflatten(dim=1, sizes=frames)
+    return modulate(h, scale, shift)
 
 
 class WanSelfAttention(nn.Module):
@@ -141,14 +178,21 @@ class WanSelfAttention(nn.Module):
             v = self.v(x).view(b, s, n, d)
             return q, k, v
 
-        q, k, v = qkv_fn(x)
+        # SF_FUSE_QKROPE=1: norm_q / norm_k and the rotary embedding in one bit-identical kernel per tensor
+        fused = fused_qk.qk_norm_rope(self, x, grid_sizes, freqs, lambda t: rope_apply(t, grid_sizes, freqs)) \
+            if fused_qk.ENABLED else None
+        if fused is not None:
+            q, k, v = fused
+            x = flash_attention(q=q, k=k, v=v, k_lens=seq_lens, window_size=self.window_size)
+        else:
+            q, k, v = qkv_fn(x)
 
-        x = flash_attention(
-            q=rope_apply(q, grid_sizes, freqs),
-            k=rope_apply(k, grid_sizes, freqs),
-            v=v,
-            k_lens=seq_lens,
-            window_size=self.window_size)
+            x = flash_attention(
+                q=rope_apply(q, grid_sizes, freqs),
+                k=rope_apply(k, grid_sizes, freqs),
+                v=v,
+                k_lens=seq_lens,
+                window_size=self.window_size)
 
         # output
         x = x.flatten(2)
@@ -337,17 +381,17 @@ class WanAttentionBlock(nn.Module):
 
         # self-attention
         y = self.self_attn(
-            self.norm1(x) * (1 + e[1]) + e[0], seq_lens, grid_sizes,
+            norm_modulate(self.norm1, x, e[1], e[0]), seq_lens, grid_sizes,
             freqs)
         # with amp.autocast(dtype=torch.float32):
-        x = x + y * e[2]
+        x = gate_residual(x, y, e[2])
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e):
             x = x + self.cross_attn(self.norm3(x), context, context_lens)
-            y = self.ffn(self.norm2(x) * (1 + e[4]) + e[3])
+            y = self.ffn(norm_modulate(self.norm2, x, e[4], e[3]))
             # with amp.autocast(dtype=torch.float32):
-            x = x + y * e[5]
+            x = gate_residual(x, y, e[5])
             return x
 
         x = cross_attn_ffn(x, context, context_lens, e)
@@ -462,7 +506,7 @@ class Head(nn.Module):
         # assert e.dtype == torch.float32
         # with amp.autocast(dtype=torch.float32):
         e = (self.modulation + e.unsqueeze(1)).chunk(2, dim=1)
-        x = (self.head(self.norm(x) * (1 + e[1]) + e[0]))
+        x = (self.head(norm_modulate(self.norm, x, e[1], e[0])))
         return x
 
 
@@ -737,12 +781,15 @@ class WanModel(ModelMixin, ConfigMixin):
             # x = torch.cat([registers, x], dim=1)
 
         gan_idx = 0
+        from .sac import checkpoint_kwargs
+        sac_kwargs = checkpoint_kwargs(causal=False)
         for ii, block in enumerate(self.blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x, **kwargs,
                     use_reentrant=False,
+                    **sac_kwargs,
                 )
             else:
                 x = block(x, **kwargs)
@@ -859,12 +906,15 @@ class WanModel(ModelMixin, ConfigMixin):
             return custom_forward
 
         # TODO: Tune the number of blocks for feature extraction
+        from .sac import checkpoint_kwargs
+        sac_kwargs = checkpoint_kwargs(causal=False)
         for block in self.blocks[:16]:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x, **kwargs,
                     use_reentrant=False,
+                    **sac_kwargs,
                 )
             else:
                 x = block(x, **kwargs)

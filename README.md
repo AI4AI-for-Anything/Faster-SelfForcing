@@ -1,3 +1,69 @@
+# Faster-SelfForcing
+
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+**2.08× faster Self-Forcing DMD training iterations on Hopper GPUs, optimized by AI agents.**
+
+![Faster-SelfForcing: 2.08× training-iteration speedup on two H200-class GPUs](docs/performance-views/01-benchmark.svg)
+
+| Implementation | Time / training iteration (ms) ↓ | Speedup ↑ |
+|---|---:|---:|
+| Reference | 10,811.0 | 1.00× |
+| **Faster-SelfForcing** | **5,191.9** | **2.08×** |
+
+Measured in a short benchmark on **2 H200-class GPUs** (Hopper), one video per GPU as in the upstream recipe, BF16 mixed precision. The timer runs the repository's real `train.py`; reference and optimized runs alternate in independent processes.
+
+## Quick Start
+
+Prepare the [environment, public weights and prompts](docs/training.md). The measured configuration is a set of environment switches on the upstream trainer; source them and launch as upstream does (64 GPUs, one video per GPU):
+
+```bash
+source scripts/configs/faster.env
+torchrun --nnodes=8 --nproc_per_node=8 --rdzv_id=5235 \
+  --rdzv_backend=c10d --rdzv_endpoint $MASTER_ADDR \
+  train.py --config_path configs/self_forcing_dmd.yaml \
+  --logdir logs/faster_self_forcing_dmd --disable-wandb
+```
+
+Tested with **PyTorch 2.7.1 + CUDA 12.8 on Hopper GPUs**. Attention falls back to FA2 when FA3 is unavailable or the input is unsupported.
+
+## Agent Optimization History
+
+Measured on two H200-class GPUs, one video per GPU.
+
+![Self-Forcing optimization history, from 1.24× to 2.08×](docs/performance-views/02-history.svg)
+
+## What changed
+
+- **Attention:** FlashAttention-3 installed from the official repository replaces FA2 in the dense attention calls. It is enabled by default when available for supported inputs; `SF_ATTN=fa2` restores the upstream path.
+- **Rollout and FSDP:** the generator is all-gathered once per rollout, cross-attention K/V is computed once, the no-grad KV-cache forwards replay as CUDA graphs, and host synchronizations are removed.
+- **Fused kernels:** Triton kernels for RMSNorm, LayerNorm + modulate, QK-norm + RoPE and the modulate / gated-residual chains.
+- **Memory and overhead:** selective activation checkpointing, frozen teacher and text encoder held in BF16, a resident text encoder, and a fast asynchronous EMA.
+
+![Optimization map: attention, rollout and FSDP, fused kernels, memory](docs/change-views/module-map.svg)
+
+In the recorded tests with FA2 attention, each of the 17 optimization settings matched the reference bit for bit on the recorded tensors. The final configuration also enabled FA3 and passed the short-trajectory statistical check described below. See the [switch table](docs/training.md#switches) and the [measured configuration](scripts/configs/faster.env).
+
+## Validation
+
+The recorded FA3 configuration passed a statistical comparison against the reference using three random seeds and 100 training steps per seed. Critic and generator losses and gradient norms were within the preset thresholds.
+
+| Training metric | Mean difference / reference standard deviation | Within threshold |
+|---|---:|:---:|
+| Critic loss | −0.145 | ✓ |
+| Critic gradient norm | +0.073 | ✓ |
+| Generator loss | −0.039 | ✓ |
+| Generator gradient norm | +0.105 | ✓ |
+
+See the [validation method](docs/training.md#benchmark-protocol) for details. Full 600-iteration training and generated-video quality have not yet been evaluated; the **2.08×** result measures training-iteration speed.
+
+## Upstream Self Forcing documentation
+
+Based on [guandeh17/Self-Forcing](https://github.com/guandeh17/Self-Forcing) at `33593df`, by Xun Huang, Zhengqi Li, Guande He, Mingyuan Zhou and Eli Shechtman. [Paper](https://arxiv.org/abs/2506.08009) · [Project page](https://self-forcing.github.io) · [Apache-2.0 license](LICENSE). The original README and authorship are retained below.
+
+<details>
+<summary>Original Self Forcing README: installation, inference and training</summary>
+
 <p align="center">
 <h1 align="center">Self Forcing</h1>
 <h3 align="center">Bridging the Train-Test Gap in Autoregressive Video Diffusion</h3>
@@ -107,3 +173,5 @@ If you find this codebase useful for your research, please kindly cite our paper
   year={2025}
 }
 ```
+
+</details>

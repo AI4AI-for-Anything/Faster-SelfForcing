@@ -77,6 +77,14 @@ class Trainer:
             wrap_strategy=config.generator_fsdp_wrap_strategy
         )
 
+        if os.environ.get("SF_FROZEN_BF16") == "1" and config.mixed_precision:
+            # SF_FROZEN_BF16=1: the frozen teacher and text encoder hold bf16 parameters, so FSDP's mixed precision has
+            # no fp32 -> bf16 parameter cast to run before each of their forwards (casting the same fp32 values once
+            # here gives the same bf16 values), and their fp32 shards stop taking memory
+            for frozen in (self.model.real_score, self.model.text_encoder):
+                for p in frozen.parameters():
+                    p.data = p.data.to(torch.bfloat16)
+
         self.model.real_score = fsdp_wrap(
             self.model.real_score,
             sharding_strategy=config.sharding_strategy,
@@ -98,6 +106,10 @@ class Trainer:
             wrap_strategy=config.text_encoder_fsdp_wrap_strategy,
             cpu_offload=getattr(config, "text_encoder_cpu_offload", False)
         )
+
+        # SF_T5_RESIDENT=1 (utils/fsdp_hold.py): the frozen text encoder all-gathers once and keeps its parameters
+        from utils import fsdp_hold
+        fsdp_hold.make_resident(self.model.text_encoder)
 
         if not config.no_visualize or config.load_raw_video:
             self.model.vae = self.model.vae.to(

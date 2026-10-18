@@ -1,4 +1,6 @@
 from wan.modules.attention import attention
+from wan.modules.compiled_ops import gate_residual, modulate
+from wan.modules import fused_qk
 from wan.modules.model import (
     WanRMSNorm,
     rope_apply,
@@ -6,7 +8,8 @@ from wan.modules.model import (
     WAN_CROSSATTENTION_CLASSES,
     rope_params,
     MLPProj,
-    sinusoidal_embedding_1d
+    sinusoidal_embedding_1d,
+    norm_modulate
 )
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from diffusers.configuration_utils import ConfigMixin, register_to_config
@@ -16,6 +19,7 @@ import torch.nn as nn
 import torch
 import math
 import torch.distributed as dist
+import os
 
 # wan 1.3B model has a weird channel / head configurations and require max-autotune to work with flexattention
 # see https://github.com/pytorch/pytorch/issues/133254
@@ -24,7 +28,15 @@ flex_attention = torch.compile(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 
+# SF_ROPE_FUSED=1: one bit-identical Triton pass per direction instead of the float64 complex round trip
+from wan.modules.fused_rope import ROPE_FUSED, fused_rope_apply  # noqa: E402
+
+
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
+    if ROPE_FUSED:
+        out = fused_rope_apply(x, grid_sizes, freqs, start_frame)
+        if out is not None:
+            return out
     n, c = x.size(2), x.size(3) // 2
 
     # split freqs
@@ -113,7 +125,17 @@ class CausalWanSelfAttention(nn.Module):
             v = self.v(x).view(b, s, n, d)
             return q, k, v
 
-        q, k, v = qkv_fn(x)
+        fused = None
+        if fused_qk.ENABLED and kv_cache is not None:
+            # SF_FUSE_QKROPE=1: norm_q / norm_k and the rotary embedding in one bit-identical kernel per tensor
+            start_frame = current_start // math.prod(grid_sizes[0][1:]).item()
+            fused = fused_qk.qk_norm_rope(
+                self, x, grid_sizes, freqs,
+                lambda t: causal_rope_apply(t, grid_sizes, freqs, start_frame=start_frame), start_frame)
+        if fused is None:
+            q, k, v = qkv_fn(x)
+        else:
+            q, k, v = fused
 
         if kv_cache is None:
             # if it is teacher forcing training?
@@ -193,36 +215,48 @@ class CausalWanSelfAttention(nn.Module):
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             current_start_frame = current_start // frame_seqlen
-            roped_query = causal_rope_apply(
-                q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
-            roped_key = causal_rope_apply(
-                k, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
+            if fused is None:
+                roped_query = causal_rope_apply(
+                    q, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
+                roped_key = causal_rope_apply(
+                    k, grid_sizes, freqs, start_frame=current_start_frame).type_as(v)
+            else:
+                roped_query, roped_key = q, k
 
             current_end = current_start + roped_query.shape[1]
             sink_tokens = self.sink_size * frame_seqlen
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
-            if self.local_attn_size != -1 and (current_end > kv_cache["global_end_index"].item()) and (
-                    num_new_tokens + kv_cache["local_end_index"].item() > kv_cache_size):
+            # SF_NO_SYNC: the pipeline keeps [global_end, local_end] as python ints next to the two index tensors
+            # (updated together below), so reading them costs no GPU->CPU sync; without it, .item() as upstream
+            host_index = kv_cache.get("host_index")
+
+            def _global_end():
+                return host_index[0] if host_index is not None else kv_cache["global_end_index"].item()
+
+            def _local_end():
+                return host_index[1] if host_index is not None else kv_cache["local_end_index"].item()
+            if self.local_attn_size != -1 and (current_end > _global_end()) and (
+                    num_new_tokens + _local_end() > kv_cache_size):
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
                 # Clone the source slice to avoid overlapping memory error
-                num_evicted_tokens = num_new_tokens + kv_cache["local_end_index"].item() - kv_cache_size
-                num_rolled_tokens = kv_cache["local_end_index"].item() - num_evicted_tokens - sink_tokens
+                num_evicted_tokens = num_new_tokens + _local_end() - kv_cache_size
+                num_rolled_tokens = _local_end() - num_evicted_tokens - sink_tokens
                 kv_cache["k"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                     kv_cache["k"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 kv_cache["v"][:, sink_tokens:sink_tokens + num_rolled_tokens] = \
                     kv_cache["v"][:, sink_tokens + num_evicted_tokens:sink_tokens + num_evicted_tokens + num_rolled_tokens].clone()
                 # Insert the new keys/values at the end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - \
-                    kv_cache["global_end_index"].item() - num_evicted_tokens
+                local_end_index = _local_end() + current_end - \
+                    _global_end() - num_evicted_tokens
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
             else:
                 # Assign new keys/values directly up to current_end
-                local_end_index = kv_cache["local_end_index"].item() + current_end - kv_cache["global_end_index"].item()
+                local_end_index = _local_end() + current_end - _global_end()
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
                 kv_cache["v"][:, local_start_index:local_end_index] = v
@@ -233,6 +267,8 @@ class CausalWanSelfAttention(nn.Module):
             )
             kv_cache["global_end_index"].fill_(current_end)
             kv_cache["local_end_index"].fill_(local_end_index)
+            if host_index is not None:
+                host_index[0], host_index[1] = current_end, local_end_index
 
         # output
         x = x.flatten(2)
@@ -311,24 +347,22 @@ class CausalWanAttentionBlock(nn.Module):
 
         # self-attention
         y = self.self_attn(
-            (self.norm1(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]).flatten(1, 2),
+            norm_modulate(self.norm1, x, e[1], e[0], (num_frames, frame_seqlen)).flatten(1, 2),
             seq_lens, grid_sizes,
             freqs, block_mask, kv_cache, current_start, cache_start)
 
         # with amp.autocast(dtype=torch.float32):
-        x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(1, 2)
+        x = gate_residual(x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)), y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)), e[2]).flatten(1, 2)
 
         # cross-attention & ffn function
         def cross_attn_ffn(x, context, context_lens, e, crossattn_cache=None):
             x = x + self.cross_attn(self.norm3(x), context,
                                     context_lens, crossattn_cache=crossattn_cache)
             y = self.ffn(
-                (self.norm2(x).unflatten(dim=1, sizes=(num_frames,
-                 frame_seqlen)) * (1 + e[4]) + e[3]).flatten(1, 2)
+                norm_modulate(self.norm2, x, e[4], e[3], (num_frames, frame_seqlen)).flatten(1, 2)
             )
             # with amp.autocast(dtype=torch.float32):
-            x = x + (y.unflatten(dim=1, sizes=(num_frames,
-                     frame_seqlen)) * e[5]).flatten(1, 2)
+            x = gate_residual(x.unflatten(dim=1, sizes=(num_frames, frame_seqlen)), y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)), e[5]).flatten(1, 2)
             return x
 
         x = cross_attn_ffn(x, context, context_lens, e, crossattn_cache)
@@ -362,7 +396,7 @@ class CausalHead(nn.Module):
         # with amp.autocast(dtype=torch.float32):
         num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
         e = (self.modulation.unsqueeze(1) + e).chunk(2, dim=2)
-        x = (self.head(self.norm(x).unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * (1 + e[1]) + e[0]))
+        x = (self.head(norm_modulate(self.norm, x, e[1], e[0], (num_frames, frame_seqlen))))
         return x
 
 
@@ -809,6 +843,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 return module(*inputs, **kwargs)
             return custom_forward
 
+        from .sac import checkpoint_kwargs
+        sac_kwargs = checkpoint_kwargs(causal=True)
         for block_index, block in enumerate(self.blocks):
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 kwargs.update(
@@ -822,6 +858,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                     create_custom_forward(block),
                     x, **kwargs,
                     use_reentrant=False,
+                    **sac_kwargs,
                 )
             else:
                 kwargs.update(
@@ -978,12 +1015,15 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 return module(*inputs, **kwargs)
             return custom_forward
 
+        from .sac import checkpoint_kwargs
+        sac_kwargs = checkpoint_kwargs(causal=True)
         for block in self.blocks:
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 x = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x, **kwargs,
                     use_reentrant=False,
+                    **sac_kwargs,
                 )
             else:
                 x = block(x, **kwargs)
@@ -1004,6 +1044,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         **kwargs
     ):
         if kwargs.get('kv_cache', None) is not None:
+            # SF_CUDAGRAPH=1 (utils/cuda_graph.py): no-grad KV-cache forwards replay a CUDA graph. This runs inside the
+            # FSDP unit, so the all-gather / reshard around it stay eager and the graph reads the unsharded parameters.
+            if os.environ.get('SF_CUDAGRAPH') == '1':
+                graphs = self.__dict__.get('_sf_graphs')
+                if graphs is None:
+                    from utils.cuda_graph import CausalForwardGraphs
+                    graphs = self.__dict__['_sf_graphs'] = CausalForwardGraphs(self)
+                if graphs.eligible(kwargs['kv_cache'], kwargs.get('crossattn_cache')):
+                    out = graphs(*args, **kwargs)
+                    if out is not None:
+                        return out
             return self._forward_inference(*args, **kwargs)
         else:
             return self._forward_train(*args, **kwargs)
