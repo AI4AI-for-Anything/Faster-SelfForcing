@@ -47,7 +47,7 @@ def hero():
              color=MUTED, fontsize=10.5)
     ax = fig.add_axes([.24, .24, .39, .45])
     ax.barh([1, 0], values, color=['#D7BDBF', RED], height=.24, zorder=3)
-    ax.set_yticks([1, 0], ['Reference', 'Faster-SelfForcing'])
+    ax.set_yticks([1, 0], ['Baseline', 'Faster-SelfForcing'])
     for y, value in zip([1, 0], values):
         ax.text(value+300, y, f'{value:,.1f} ms', va='center',
                 color=INK, fontsize=11.5, weight='bold')

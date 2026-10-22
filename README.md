@@ -8,10 +8,10 @@
 
 | Implementation | Time / training iteration (ms) ↓ | Speedup ↑ |
 |---|---:|---:|
-| Reference | 10,811.0 | 1.00× |
+| Baseline | 10,811.0 | 1.00× |
 | **Faster-SelfForcing** | **5,191.9** | **2.08×** |
 
-Measured in a short benchmark on **2 H200-class GPUs** (Hopper), one video per GPU as in the upstream recipe, BF16 mixed precision. The timer runs the repository's real `train.py`; reference and optimized runs alternate in independent processes.
+Measured in a short benchmark on **2 H200-class GPUs** (Hopper), one video per GPU as in the upstream recipe, BF16 mixed precision. The timer runs the repository's real `train.py`; baseline and optimized runs alternate in independent processes.
 
 ## Quick Start
 
@@ -42,13 +42,13 @@ Measured on two H200-class GPUs, one video per GPU.
 
 ![Optimization map: attention, rollout and FSDP, fused kernels, memory](docs/change-views/module-map.svg)
 
-In the recorded tests with FA2 attention, each of the 17 optimization settings matched the reference bit for bit on the recorded tensors. The final configuration also enabled FA3 and passed the short-trajectory statistical check described below. See the [switch table](docs/training.md#switches) and the [measured configuration](scripts/configs/faster.env).
+In the recorded tests with FA2 attention, each of the 17 optimization settings matched the baseline bit for bit on the recorded tensors. The final configuration also enabled FA3 and passed the short-trajectory statistical check described below. See the [switch table](docs/training.md#switches) and the [measured configuration](scripts/configs/faster.env).
 
 ## Validation
 
-The recorded FA3 configuration passed a statistical comparison against the reference using three random seeds and 100 training steps per seed. Critic and generator losses and gradient norms were within the preset thresholds.
+The recorded FA3 configuration passed a statistical comparison against the baseline using three random seeds and 100 training steps per seed. Critic and generator losses and gradient norms were within the preset thresholds.
 
-| Training metric | Mean difference / reference standard deviation | Within threshold |
+| Training metric | Mean difference / baseline standard deviation | Within threshold |
 |---|---:|:---:|
 | Critic loss | −0.145 | ✓ |
 | Critic gradient norm | +0.073 | ✓ |
