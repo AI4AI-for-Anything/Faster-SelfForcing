@@ -80,11 +80,11 @@ the T5 gather count). A zero count means that path never ran; check them before 
 | `SF_FROZEN_BF16` | Frozen teacher and text encoder keep BF16 parameters; no per-forward FP32→BF16 casts | Bit-identical |
 | `SF_T5_RESIDENT` | Text encoder all-gathered once and kept | Bit-identical |
 
-The numerics column describes the recorded tests of the historical configuration. "Bit-identical" means that, with the setting enabled and FA2 attention, all recorded tensors (losses, outputs, gradients, updates, optimizer state and buffers) matched the reference exactly. With FA3 enabled, the final configuration instead passed the short-trajectory statistical check described in the README. A separately installed FA3 build requires its own validation.
+The numerics column describes the recorded tests of the historical configuration. "Bit-identical" means that, with the setting enabled and FA2 attention, all recorded tensors (losses, outputs, gradients, updates, optimizer state and buffers) matched the baseline exactly. With FA3 enabled, the final configuration instead passed the short-trajectory statistical check described in the README. A separately installed FA3 build requires its own validation.
 
 ## Memory
 
-At one video per GPU on two GPUs, peak allocated memory per GPU was **93.55 GiB (reference) → 83.57 GiB (optimized)**,
+At one video per GPU on two GPUs, peak allocated memory per GPU was **93.55 GiB (baseline) → 83.57 GiB (optimized)**,
 and peak reserved memory **128.4 → 125.8 GiB**, on GPUs with 140 GiB of memory. The upstream config uses hybrid
 sharding, which shards parameters within a node, so the footprint is smaller with eight GPUs per node; an 80 GB
 configuration has not been measured.
@@ -97,8 +97,8 @@ configuration has not been measured.
   critic : generator updates 5 : 1.
 - An iteration is one critic optimizer step; every fifth iteration also has a generator step. The timer runs the
   repository's real `train.py` and skips 10 warm-up iterations, then times two windows of 10 iterations.
-- Reference → candidate → reference in independent processes. Each window is checked on its own; a window that
-  deviates from the frozen reference invalidates the run.
-- Validation: structure checks, exact tensor comparisons, and statistical comparisons of 100-step training runs with matched seeds. The acceptance threshold for each metric is twice the reference standard deviation across seeds, set before testing optimized configurations.
+- Baseline → candidate → baseline in independent processes. Each window is checked on its own; a window that
+  deviates from the frozen baseline invalidates the run.
+- Validation: structure checks, exact tensor comparisons, and statistical comparisons of 100-step training runs with matched seeds. The acceptance threshold for each metric is twice the baseline standard deviation across seeds, set before testing optimized configurations.
 
-The historical FA3 comparison recorded 12,379 exact matches among 40,490 tensors; the final configuration did not match the reference bit for bit. Its statistical check used three matched random seeds and measured critic and generator losses and gradient norms at steps 50 and 100. The README reports mean differences normalized by the reference standard deviation across seeds. These measurements concern short training trajectories, not generated-video quality.
+The historical FA3 comparison recorded 12,379 exact matches among 40,490 tensors; the final configuration did not match the baseline bit for bit. Its statistical check used three matched random seeds and measured critic and generator losses and gradient norms at steps 50 and 100. The README reports mean differences normalized by the baseline standard deviation across seeds. These measurements concern short training trajectories, not generated-video quality.
